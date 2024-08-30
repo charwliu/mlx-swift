@@ -21,6 +21,7 @@ final public class RoPE: Module, UnaryLayer {
     let traditional: Bool
     let base: Float
     let scale: Float
+    let freqs: MLXArray?
 
     /// Initialize ``RoPE``.
     ///
@@ -29,12 +30,13 @@ final public class RoPE: Module, UnaryLayer {
     ///   - traditional: If `true` choose the traditional implementation which is slightly less efficient
     ///   - base: The base used to compute angular frequency for each dimension in the positional encodings
     ///   - scale: scale used to scale the positions
-    public init(dimensions: Int, traditional: Bool = false, base: Float = 10_000, scale: Float = 1)
+    public init(dimensions: Int, traditional: Bool = false, base: Float = 10_000, scale: Float = 1, freqs: MLXArray?)
     {
         self.dimensions = dimensions
         self.traditional = traditional
         self.base = base
         self.scale = scale
+        self.freqs = freqs
     }
 
     public func callAsFunction(_ x: MLXArray, offset: Int) -> MLXArray {
@@ -42,7 +44,7 @@ final public class RoPE: Module, UnaryLayer {
         var x = x.reshaped(-1, x.dim(-2), x.dim(-1))
         x = MLXFast.RoPE(
             x, dimensions: dimensions, traditional: traditional, base: base, scale: scale,
-            offset: offset)
+            offset: offset, freqs: freqs)
         return x.reshaped(shape)
     }
 

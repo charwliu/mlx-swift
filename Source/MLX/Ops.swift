@@ -726,7 +726,7 @@ public func convolve<A: ScalarOrArray, B: ScalarOrArray>(
             let padLeft = weightSize / 2
             let padRight = max(0, padLeft / 2 - 1)
 
-            input = padded(input, widths: [0, [padLeft, padRight], 0], stream: stream)
+            input = padded(input, widths: [0, [padLeft, padRight], 0], mode: "constant",  stream: stream)
         }
     }
 
@@ -1592,16 +1592,18 @@ public func outer(
 /// - <doc:shapes>
 /// - ``padded(_:widths:value:stream:)``
 public func padded(
-    _ array: MLXArray, width: IntOrPair, value: MLXArray? = nil, stream: StreamOrDevice = .default
+    _ array: MLXArray, width: IntOrPair, value: MLXArray? = nil, mode: String = "constant", stream: StreamOrDevice = .default
 ) -> MLXArray {
     let ndim = array.ndim
     let axes = Array(Int32(0) ..< Int32(ndim))
     let lowPads = (0 ..< ndim).map { _ in width.first.int32 }
     let highPads = (0 ..< ndim).map { _ in width.second.int32 }
     let value = value ?? MLXArray(0, dtype: array.dtype)
+    let mlx_mode = mlx_string_new(mode.cString(using: .utf8))!
+    defer { mlx_free(mlx_mode) }
 
     return MLXArray(
-        mlx_pad(array.ctx, axes, ndim, lowPads, ndim, highPads, ndim, value.ctx, stream.ctx))
+        mlx_pad(array.ctx, axes, ndim, lowPads, ndim, highPads, ndim, value.ctx, mlx_mode,  stream.ctx))
 }
 
 /// Pad an array with a constant value.
@@ -1617,6 +1619,7 @@ public func padded(
 /// - ``padded(_:width:value:stream:)``
 public func padded(
     _ array: MLXArray, widths: [IntOrPair], value: MLXArray? = nil,
+    mode: String = "constant",
     stream: StreamOrDevice = .default
 ) -> MLXArray {
     let ndim = array.ndim
@@ -1624,9 +1627,11 @@ public func padded(
     let lowPads = widths.map { $0.first.int32 }
     let highPads = widths.map { $0.second.int32 }
     let value = value ?? MLXArray(0, dtype: array.dtype)
+    let mlx_mode = mlx_string_new(mode.cString(using: .utf8))!
+    defer { mlx_free(mlx_mode) }
 
     return MLXArray(
-        mlx_pad(array.ctx, axes, ndim, lowPads, ndim, highPads, ndim, value.ctx, stream.ctx))
+        mlx_pad(array.ctx, axes, ndim, lowPads, ndim, highPads, ndim, value.ctx, mlx_mode, stream.ctx))
 }
 
 /// Returns a partitioned copy of the array such that the smaller `kth`
