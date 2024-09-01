@@ -24,7 +24,7 @@ import MLX
 /// > Note: `MLXNN.RoPE` uses this implementation internally.
 public func RoPE(
     _ array: MLXArray, dimensions: Int, traditional: Bool, base: Float, scale: Float, offset: Int,
-    freqs: MLXArray?,
+    freqs: MLXArray? = nil,
     stream: StreamOrDevice = .default
 ) -> MLXArray {
     MLXArray(
