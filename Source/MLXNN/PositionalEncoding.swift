@@ -30,7 +30,7 @@ final public class RoPE: Module, UnaryLayer {
     ///   - traditional: If `true` choose the traditional implementation which is slightly less efficient
     ///   - base: The base used to compute angular frequency for each dimension in the positional encodings
     ///   - scale: scale used to scale the positions
-    public init(dimensions: Int, traditional: Bool = false, base: Float = 10_000, scale: Float = 1, freqs: MLXArray?)
+    public init(dimensions: Int, traditional: Bool = false, base: Float = 10_000, scale: Float = 1, freqs: MLXArray? = nil)
     {
         self.dimensions = dimensions
         self.traditional = traditional

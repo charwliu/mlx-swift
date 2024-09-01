@@ -56,7 +56,7 @@ public func RoPE(
 /// ```
 public func scaledDotProductAttention(
     queries: MLXArray, keys: MLXArray, values: MLXArray, scale: Float, mask: MLXArray?,
-    memory_efficient_threshold: Int32?,
+    memory_efficient_threshold: Int32? = nil,
     stream: StreamOrDevice = .default
 ) -> MLXArray {
     if let memory_efficient_threshold = memory_efficient_threshold {
