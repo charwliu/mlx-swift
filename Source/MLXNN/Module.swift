@@ -382,7 +382,7 @@ open class Module {
         /// are used -- there are no names that don't match.
         static public let noUnusedKeys = VerifyUpdate(rawValue: 1 << 0)
 
-        // TODO: add a load_weights style strict -- verify that all keys on the model are specified
+        static public let allModelKeysSet = VerifyUpdate(rawValue: 1 << 1)
 
         static public let all = VerifyUpdate(rawValue: -1)
         static public let none = VerifyUpdate([])
@@ -429,10 +429,10 @@ open class Module {
     /// - ``mapParameters(map:isLeaf:)``
     /// - ``update(modules:verify:)``
     @discardableResult
-    public func update(parameters: ModuleParameters, verify: VerifyUpdate) throws -> Self {
+    open func update(parameters: ModuleParameters, verify: VerifyUpdate) throws -> Self {
 
         func apply(key: String, _ item: ModuleItem, _ value: NestedItem<String, MLXArray>) throws {
-            if case .none = value {
+            if case .none = value, !verify.contains(.allModelKeysSet) {
                 return
             }
 
@@ -449,20 +449,46 @@ open class Module {
                 }
                 p.update(newArray)
 
+            case (.value(.parameters(let p)), .none):
+                throw UpdateError.keyNotFound(base: describeType(self), key: key)
+
             case (.array(let array), .array(let values)):
                 for (i, (arrayItem, valueItem)) in zip(array, values).enumerated() {
                     try apply(key: "\(key).\(i)", arrayItem, valueItem)
                 }
+                if verify.contains(.allModelKeysSet) {
+                    for i in values.count ..< array.count {
+                        try apply(key: "\(key).\(i)", array[i], .none)
+                    }
+                }
+
+            case (.array(let array), .none):
+                for (i, arrayItem) in array.enumerated() {
+                    try apply(key: "\(key).\(i)", arrayItem, .none)
+                }
 
             case (.dictionary(let dictionary), .dictionary(let values)):
-                for (valueKey, valueItem) in values {
-                    if let dictionaryItem = dictionary[key] {
-                        try apply(key: "\(key).\(valueKey)", dictionaryItem, valueItem)
+                for (dictionaryKey, dictionaryItem) in dictionary {
+                    if let valueItem = values[key] {
+                        try apply(key: "\(key).\(dictionaryKey)", dictionaryItem, valueItem)
+                    } else if verify.contains(.allModelKeysSet) {
+                        try apply(key: "\(key).\(dictionaryKey)", dictionaryItem, .none)
                     }
+                }
+
+            case (.dictionary(let dictionary), .none):
+                for (dictionaryKey, dictionaryItem) in dictionary {
+                    try apply(key: "\(key).\(dictionaryKey)", dictionaryItem, .none)
                 }
 
             case (.value(.module(let module)), .dictionary(let values)):
                 try module.update(parameters: NestedDictionary(values: values), verify: verify)
+
+            case (.value(.module(let module)), .none):
+                try module.update(parameters: NestedDictionary(), verify: verify)
+
+            case (.none, .none), (.value(.none), .none), (.value(.other(_)), .none):
+                break
 
             default:
                 fatalError("Unable to set \(key) on \(self): \(item) not compatible with \(value)")
@@ -474,6 +500,8 @@ open class Module {
             if let value = parameters[key] {
                 processed.remove(key)
                 try apply(key: key, item, value)
+            } else if verify.contains(.allModelKeysSet) {
+                try apply(key: key, item, .none)
             }
         }
 
@@ -499,7 +527,7 @@ open class Module {
     ///   - filter: filter for parameters to apply to
     ///   - map: function to apply to the matched parameters
     @discardableResult
-    public func apply(
+    open func apply(
         filter: (Module, String, ModuleItem) -> Bool = Module.filterValidParameters,
         map: @escaping (MLXArray) -> MLXArray
     ) -> Self {
@@ -558,7 +586,7 @@ open class Module {
     /// - ``leafModules()``
     /// - ``QuantizedLinear/quantize(model:groupSize:bits:predicate:)``
     @discardableResult
-    public func update(modules: ModuleChildren, verify: VerifyUpdate) throws -> Self {
+    open func update(modules: ModuleChildren, verify: VerifyUpdate) throws -> Self {
 
         func apply(key: String, _ item: ModuleItem, _ value: NestedItem<String, Module>) throws {
             if case .none = value {
@@ -587,10 +615,29 @@ open class Module {
                 case .value:
                     // update array
                     var newModules = [Module]()
-                    for item in values {
-                        switch item {
+                    for (index, value) in values.enumerated() {
+                        switch value {
                         case .value(let module):
                             newModules.append(module)
+
+                        case .none:
+                            // e.g. this is updating @ModuleInfo var mlp: (Linear, GELU, Linear)
+                            if index < items.count {
+                                switch items[index] {
+                                case .value(.module(let m)):
+                                    // if possible just copy forward the original item
+                                    newModules.append(m)
+                                default:
+                                    // otherwise we don't know how to update it
+                                    throw UpdateError.unableToCollectModulesFromContainer(
+                                        base: describeType(self), key: key)
+                                }
+                            } else {
+                                // past the end of items
+                                throw UpdateError.unableToCollectModulesFromContainer(
+                                    base: describeType(self), key: key)
+                            }
+
                         default:
                             throw UpdateError.unableToCollectModulesFromContainer(
                                 base: describeType(self), key: key)
@@ -669,7 +716,7 @@ open class Module {
                 try setter.updateModule(value)
             } catch {
                 throw UpdateError.needModuleInfo(
-                    "Unable to set modules for \(describeType(self)).\(key) -- maybe type mismatch: \(describeType(value)))"
+                    "Unable to set modules for \(describeType(self)).\(key) -- maybe type mismatch: \(describeType(value)), \(error)"
                 )
             }
         } else {
@@ -887,7 +934,8 @@ extension Module {
     ///
     /// ### See Also
     /// - <doc:module-filters>
-    static public let filterAll = { (module: Module, key: String, item: ModuleItem) in
+    static public let filterAll: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         true
     }
 
@@ -895,7 +943,8 @@ extension Module {
     ///
     /// ### See Also
     /// - <doc:module-filters>
-    static public let filterValidChild = { (module: Module, key: String, item: ModuleItem) in
+    static public let filterValidChild: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .array, .dictionary: true
         case .value(.module): true
@@ -910,7 +959,8 @@ extension Module {
     /// - <doc:module-filters>
     /// - ``filterLocalParameters``
     /// - ``filterTrainableParameters``
-    static public let filterValidParameters = { (module: Module, key: String, item: ModuleItem) in
+    static public let filterValidParameters: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .array, .dictionary: !key.hasPrefix("_")
         case .value(.parameters), .value(.module): !key.hasPrefix("_")
@@ -925,7 +975,8 @@ extension Module {
     /// - <doc:module-filters>
     /// - ``filterValidParameters``
     /// - ``filterTrainableParameters``
-    static public let filterLocalParameters = { (module: Module, key: String, item: ModuleItem) in
+    static public let filterLocalParameters: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .array, .dictionary: !key.hasPrefix("_")
         case .value(.parameters): !key.hasPrefix("_")
@@ -941,7 +992,7 @@ extension Module {
     /// - ``freeze(recursive:keys:strict:)``
     /// - ``filterValidParameters``
     /// - ``filterLocalParameters``
-    static public let filterTrainableParameters = {
+    static public let filterTrainableParameters: @Sendable (Module, String, ModuleItem) -> Bool = {
         (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .array, .dictionary, .value(.parameters), .value(.module):
@@ -954,7 +1005,8 @@ extension Module {
     ///
     /// ### See Also
     /// - <doc:module-filters>
-    static public let filterOther = { (module: Module, key: String, item: ModuleItem) in
+    static public let filterOther: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .value(.other): true
         default: false
@@ -1062,7 +1114,8 @@ extension Module {
     /// ### See Also
     /// - <doc:module-filters>
     /// - ``filterMap(filter:map:isLeaf:)``
-    static public let isLeafDefault = { (module: Module, key: String, item: ModuleItem) in
+    static public let isLeafDefault: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .array, .dictionary, .none, .value(.module): false
         case .value(.parameters), .value(.other), .value(.none): true
@@ -1074,7 +1127,8 @@ extension Module {
     /// ### See Also
     /// - <doc:module-filters>
     /// - ``filterMap(filter:map:isLeaf:)``
-    static public let isLeafModule = { (module: Module, key: String, item: ModuleItem) in
+    static public let isLeafModule: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .array, .dictionary, .none: false
         case .value(.module): true
@@ -1087,7 +1141,8 @@ extension Module {
     /// ### See Also
     /// - <doc:module-filters>
     /// - ``filterMap(filter:map:isLeaf:)``
-    static public let isLeafModuleNoChildren = { (module: Module, key: String, item: ModuleItem) in
+    static public let isLeafModuleNoChildren: @Sendable (Module, String, ModuleItem) -> Bool = {
+        (module: Module, key: String, item: ModuleItem) in
         switch item {
         case .array, .dictionary, .none: false
         case .value(.module(let m)): m.children().isEmpty
@@ -1385,8 +1440,27 @@ private protocol TypeErasedSetterProvider {
         func updateModule(_ value: Any) throws {
             if let value = value as? T {
                 info.module = value
+            } else if let value = value as? [Module] {
+                // try to recast as a tuple, e.g.
+                // @ModuleInfo var mlp: (Linear, GELU, Linear)
+
+                if value.count == 2, let values = (value[0], value[1]) as? T {
+                    info.module = values
+                } else if value.count == 3, let values = (value[0], value[1], value[2]) as? T {
+                    info.module = values
+                } else if value.count == 4,
+                    let values = (value[0], value[1], value[2], value[3]) as? T
+                {
+                    info.module = values
+                } else if value.count == 5,
+                    let values = (value[0], value[1], value[2], value[4], value[5]) as? T
+                {
+                    info.module = values
+                } else {
+                    throw UpdateError.unableToCast(String(describing: T.self))
+                }
             } else {
-                throw UpdateError.unableToCast
+                throw UpdateError.unableToCast(String(describing: T.self))
             }
         }
     }
@@ -1403,7 +1477,7 @@ enum UpdateError: Error {
     case keyNotFound(base: String, key: String)
     case needModuleInfo(String)
     case unableToSet(String)
-    case unableToCast
+    case unableToCast(String)
     case unhandledKeys(base: String, keys: [String])
 }
 

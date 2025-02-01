@@ -3,10 +3,11 @@
 import Cmlx
 import Foundation
 
-class CompiledFunction {
+// Note: this is all immutable state -- the `id` property is only set at init time
+final class CompiledFunction: @unchecked (Sendable) {
 
     /// unique (for the lifetime of the object) identifier for the compiled function
-    var id: UInt!
+    private var id: UInt!
 
     /// the function to compile
     let f: ([MLXArray]) -> [MLXArray]
@@ -73,21 +74,23 @@ class CompiledFunction {
         }
 
         let innerClosure = new_mlx_closure(inner(tracers:))
-        defer { mlx_free(innerClosure) }
+        defer { mlx_closure_free(innerClosure) }
 
         // note: this will use the cached compile (via the id)
         // but will be able to re-evaluate with fresh state if needed
-        let compiled = mlx_detail_compile(innerClosure, id, shapeless, [], 0)!
-        defer { mlx_free(compiled) }
+        var compiled = mlx_closure_new()
+        mlx_detail_compile(&compiled, innerClosure, id, shapeless, [], 0)
+        defer { mlx_closure_free(compiled) }
 
         let innerInputs = arguments + stateInputs
         let innerInputsVector = new_mlx_vector_array(innerInputs)
-        defer { mlx_free(innerInputsVector) }
+        defer { mlx_vector_array_free(innerInputsVector) }
 
         // will compile the function (if needed) and evaluate the
         // compiled graph
-        let resultVector = mlx_closure_apply(compiled, innerInputsVector)!
-        defer { mlx_free(resultVector) }
+        var resultVector = mlx_vector_array_new()
+        mlx_closure_apply(&resultVector, compiled, innerInputsVector)
+        defer { mlx_vector_array_free(resultVector) }
 
         let resultsPlusStateOutput = mlx_vector_array_values(resultVector)
 
@@ -128,9 +131,7 @@ class CompiledFunction {
 public func compile(
     inputs: [any Updatable] = [], outputs: [any Updatable] = [], shapeless: Bool = false,
     _ f: @escaping ([MLXArray]) -> [MLXArray]
-) -> (
-    [MLXArray]
-) -> [MLXArray] {
+) -> @Sendable ([MLXArray]) -> [MLXArray] {
     let compileState = CompiledFunction(inputs: inputs, outputs: outputs, shapeless: shapeless, f)
 
     return { arrays in
@@ -147,9 +148,7 @@ public func compile(
 public func compile(
     inputs: [any Updatable] = [], outputs: [any Updatable] = [], shapeless: Bool = false,
     _ f: @escaping (MLXArray) -> MLXArray
-) -> (
-    MLXArray
-) -> MLXArray {
+) -> @Sendable (MLXArray) -> MLXArray {
     let compileState = CompiledFunction(inputs: inputs, outputs: outputs, shapeless: shapeless) {
         [f($0[0])]
     }
@@ -169,7 +168,7 @@ public func compile(
     inputs: [any Updatable] = [], outputs: [any Updatable] = [], shapeless: Bool = false,
     _ f: @escaping (MLXArray, MLXArray) -> MLXArray
 )
-    -> (MLXArray, MLXArray) -> MLXArray
+    -> @Sendable (MLXArray, MLXArray) -> MLXArray
 {
     let compileState = CompiledFunction(inputs: inputs, outputs: outputs, shapeless: shapeless) {
         [f($0[0], $0[1])]
@@ -188,7 +187,7 @@ public func compile(
 /// - ``compile(inputs:outputs:shapeless:_:)-7korq``
 public func compile(
     inputs: [any Updatable] = [], outputs: [any Updatable] = [], shapeless: Bool = false,
-    _ f: @escaping (MLXArray, MLXArray, MLXArray) -> MLXArray
+    _ f: @Sendable @escaping (MLXArray, MLXArray, MLXArray) -> MLXArray
 )
     -> (MLXArray, MLXArray, MLXArray) -> MLXArray
 {

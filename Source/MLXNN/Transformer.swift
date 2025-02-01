@@ -158,9 +158,9 @@ class TransformerEncoderLayer: Module {
         } else {
             y = attention(x, keys: x, values: x, mask: mask)
             y = dropout1(y)
-            y = ln1(x + y)
+            x = ln1(x + y)
 
-            y = linear1(y)
+            y = linear1(x)
             y = activation(y)
             y = dropout2(y)
             y = linear2(y)
@@ -267,7 +267,7 @@ class TransformerDecoderLayer: Module {
 
             y = crossAttention(y, keys: memory, values: memory, mask: memoryMask)
             y = dropout2(y)
-            x = ln1(x + y)
+            x = ln2(x + y)
 
             y = linear1(x)
             y = activation(y)

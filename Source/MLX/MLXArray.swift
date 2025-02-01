@@ -13,12 +13,25 @@ public final class MLXArray {
     /// Initialize with the given +1 context (transfer ownership).
     ///
     /// This initializer is for `Cmlx` interoperation.
-    public init(_ ctx: mlx_array) {
+    public init(_ ctx: consuming mlx_array) {
         self.ctx = ctx
     }
 
+    /// return the equivalent of a `.none` MLXArray (for the C API).
+    ///
+    /// Not called `.none` to avoid abiguity with `Optional`.  This can be used
+    /// to pass an optional ``MLXArray`` as a non-optional (but possibly empty/null)
+    /// `mlx_array`:
+    ///
+    /// ```swift
+    /// mlx_func((freqs ?? .mlxNone).ctx)
+    /// ```
+    public static var mlxNone: MLXArray {
+        .init(mlx_array_new())
+    }
+
     deinit {
-        mlx_free(ctx)
+        mlx_array_free(ctx)
     }
 
     /// Number of bytes per element
@@ -68,7 +81,7 @@ public final class MLXArray {
     /// print(array.dtype)
     /// // .int64 (aka Int.dtype)
     /// ```
-    public var dtype: DType { DType(mlx_array_get_dtype(ctx)) }
+    public var dtype: DType { DType(mlx_array_dtype(ctx)) }
 
     /// Dimensions of the array.
     ///
@@ -120,14 +133,21 @@ public final class MLXArray {
         return (Int(cShape[0]), Int(cShape[1]), Int(cShape[2]), Int(cShape[3]))
     }
 
-    /// Strides of the array.
-    ///
-    /// ```swift
-    /// let array = MLXArray(0 ..< 12, [3, 4])
-    /// print(array.strides)
-    /// // [4, 1]
-    /// ```
+    /// Strides of the array.  Note: do not use this as it changes
+    /// before and after evaluation.  See also ``asData(access:)``
+    /// and ``MLXArray/MLXArrayData/strides``.
+    @available(*, deprecated, message: "Do not use -- see asData(access:)")
     public var strides: [Int] {
+        let ndim = mlx_array_ndim(ctx)
+        guard ndim > 0 else { return [] }
+        let strides = mlx_array_strides(ctx)!
+        return (0 ..< ndim).map { Int(strides[$0]) }
+    }
+
+    /// Strides of the array backing.
+    ///
+    /// Note: this is only stable once the array is evaluated.
+    var internalStrides: [Int] {
         let ndim = mlx_array_ndim(ctx)
         guard ndim > 0 else { return [] }
         let strides = mlx_array_strides(ctx)!
@@ -149,6 +169,113 @@ public final class MLXArray {
         item(T.self)
     }
 
+    /// specialized conversion between integer types -- see ``item(_:)``
+    private func itemInt() -> Int {
+        switch self.dtype {
+        case .bool:
+            var r = false
+            mlx_array_item_bool(&r, self.ctx)
+            return r ? 1 : 0
+        case .uint8:
+            var r: UInt8 = 0
+            mlx_array_item_uint8(&r, self.ctx)
+            return Int(r)
+        case .uint16:
+            var r: UInt16 = 0
+            mlx_array_item_uint16(&r, self.ctx)
+            return Int(r)
+        case .uint32:
+            var r: UInt32 = 0
+            mlx_array_item_uint32(&r, self.ctx)
+            return Int(r)
+        case .uint64:
+            var r: UInt64 = 0
+            mlx_array_item_uint64(&r, self.ctx)
+            return Int(r)
+        case .int8:
+            var r: Int8 = 0
+            mlx_array_item_int8(&r, self.ctx)
+            return Int(r)
+        case .int16:
+            var r: Int16 = 0
+            mlx_array_item_int16(&r, self.ctx)
+            return Int(r)
+        case .int32:
+            var r: Int32 = 0
+            mlx_array_item_int32(&r, self.ctx)
+            return Int(r)
+        case .int64:
+            var r: Int64 = 0
+            mlx_array_item_int64(&r, self.ctx)
+            return Int(r)
+
+        default:
+            fatalError("itemInt expected an integer dtype: \(self.dtype)")
+        }
+    }
+
+    /// specialized conversion between integer types -- see ``item(_:)``
+    private func itemUInt() -> UInt {
+        switch self.dtype {
+        case .bool:
+            var r = false
+            mlx_array_item_bool(&r, self.ctx)
+            return r ? 1 : 0
+        case .uint8:
+            var r: UInt8 = 0
+            mlx_array_item_uint8(&r, self.ctx)
+            return UInt(r)
+        case .uint16:
+            var r: UInt16 = 0
+            mlx_array_item_uint16(&r, self.ctx)
+            return UInt(r)
+        case .uint32:
+            var r: UInt32 = 0
+            mlx_array_item_uint32(&r, self.ctx)
+            return UInt(r)
+        case .uint64:
+            var r: UInt64 = 0
+            mlx_array_item_uint64(&r, self.ctx)
+            return UInt(r)
+        case .int8:
+            var r: Int8 = 0
+            mlx_array_item_int8(&r, self.ctx)
+            return UInt(r)
+        case .int16:
+            var r: Int16 = 0
+            mlx_array_item_int16(&r, self.ctx)
+            return UInt(r)
+        case .int32:
+            var r: Int32 = 0
+            mlx_array_item_int32(&r, self.ctx)
+            return UInt(r)
+        case .int64:
+            var r: Int64 = 0
+            mlx_array_item_int64(&r, self.ctx)
+            return UInt(r)
+
+        default: fatalError("itemUInt expected an integer dtype: \(self.dtype)")
+        }
+    }
+
+    /// specialized conversion between float types -- see ``item(_:)``
+    private func itemFloat() -> Float {
+        switch self.dtype {
+        #if !arch(x86_64)
+            case .float16:
+                var r: Float16 = 0
+                mlx_array_item_float16(&r, self.ctx)
+                return Float(r)
+        #endif
+        case .float32:
+            var r: Float32 = 0
+            mlx_array_item_float32(&r, self.ctx)
+            return Float(r)
+
+        default: fatalError("itemFloat expected a floating point dtype: \(self.dtype)")
+        }
+    }
+
     /// Return the scalar value of the array.
     ///
     /// It is a contract violation to call this on an array with more than one element.
@@ -163,31 +290,121 @@ public final class MLXArray {
     public func item<T: HasDType>(_ type: T.Type) -> T {
         precondition(self.size == 1)
 
+        // special cases for reading integers and floats from (roughly)
+        // same typed arrays -- this avoids doing a conversion which
+        // might end up as an unexpected operation that would mess up
+        // async evaluation
+        switch type {
+        case is Int.Type, is Int8.Type, is Int16.Type, is Int32.Type, is Int64.Type:
+            if self.dtype.isInteger {
+                switch type {
+                case is Int.Type: return Int(itemInt()) as! T
+                case is Int8.Type: return Int8(itemInt()) as! T
+                case is Int16.Type: return Int16(itemInt()) as! T
+                case is Int32.Type: return Int32(itemInt()) as! T
+                case is Int64.Type: return Int64(itemInt()) as! T
+                default:
+                    // fall through to default handling
+                    break
+                }
+            }
+        case is UInt8.Type, is UInt16.Type, is UInt32.Type, is UInt64.Type, is UInt.Type:
+            if self.dtype.isInteger {
+                switch type {
+                case is UInt8.Type: return UInt8(itemUInt()) as! T
+                case is UInt16.Type: return UInt16(itemUInt()) as! T
+                case is UInt32.Type: return UInt32(itemUInt()) as! T
+                case is UInt64.Type: return UInt64(itemUInt()) as! T
+                case is UInt.Type: return UInt(itemUInt()) as! T
+                default:
+                    // fall through to default handling
+                    break
+                }
+            }
+        #if !arch(x86_64)
+            case is Float.Type, is Float32.Type, is Float16.Type:
+                switch self.dtype {
+                case .float16, .float32:
+                    switch type {
+                    case is Float.Type: return Float(itemFloat()) as! T
+                    case is Float32.Type: return Float32(itemFloat()) as! T
+                    case is Float16.Type: return Float16(itemFloat()) as! T
+                    default:
+                        // fall through to default handling
+                        break
+                    }
+                default:
+                    break
+                }
+        #endif
+        default:
+            break
+        }
+
+        // default handling -- convert the type if needed
         if type.dtype != self.dtype {
             return self.asType(type).item(type)
         }
 
-        self.eval()
-
         switch type {
-        case is Bool.Type: return mlx_array_item_bool(self.ctx) as! T
-        case is UInt8.Type: return mlx_array_item_uint8(self.ctx) as! T
-        case is UInt16.Type: return mlx_array_item_uint16(self.ctx) as! T
-        case is UInt32.Type: return mlx_array_item_uint32(self.ctx) as! T
-        case is UInt64.Type: return mlx_array_item_uint64(self.ctx) as! T
-        case is Int8.Type: return mlx_array_item_int8(self.ctx) as! T
-        case is Int16.Type: return mlx_array_item_int16(self.ctx) as! T
-        case is Int32.Type: return mlx_array_item_int32(self.ctx) as! T
-        case is Int64.Type: return mlx_array_item_int64(self.ctx) as! T
-        case is Int.Type: return Int(mlx_array_item_int64(self.ctx)) as! T
+        case is Bool.Type:
+            var r: Bool = false
+            mlx_array_item_bool(&r, self.ctx)
+            return r as! T
+        case is UInt8.Type:
+            var r: UInt8 = 0
+            mlx_array_item_uint8(&r, self.ctx)
+            return r as! T
+        case is UInt16.Type:
+            var r: UInt16 = 0
+            mlx_array_item_uint16(&r, self.ctx)
+            return r as! T
+        case is UInt32.Type:
+            var r: UInt32 = 0
+            mlx_array_item_uint32(&r, self.ctx)
+            return r as! T
+        case is UInt64.Type:
+            var r: UInt64 = 0
+            mlx_array_item_uint64(&r, self.ctx)
+            return r as! T
+        case is Int8.Type:
+            var r: Int8 = 0
+            mlx_array_item_int8(&r, self.ctx)
+            return r as! T
+        case is Int16.Type:
+            var r: Int16 = 0
+            mlx_array_item_int16(&r, self.ctx)
+            return r as! T
+        case is Int32.Type:
+            var r: Int32 = 0
+            mlx_array_item_int32(&r, self.ctx)
+            return r as! T
+        case is Int64.Type:
+            var r: Int64 = 0
+            mlx_array_item_int64(&r, self.ctx)
+            return r as! T
+        case is Int.Type:
+            var r: Int64 = 0
+            mlx_array_item_int64(&r, self.ctx)
+            return Int(r) as! T
         #if !arch(x86_64)
-            case is Float16.Type: return mlx_array_item_float16(self.ctx) as! T
+            case is Float16.Type:
+                var r: Float16 = 0
+                mlx_array_item_float16(&r, self.ctx)
+                return r as! T
         #endif
-        case is Float32.Type: return mlx_array_item_float32(self.ctx) as! T
-        case is Float.Type: return mlx_array_item_float32(self.ctx) as! T
+        case is Float32.Type:
+            var r: Float32 = 0
+            mlx_array_item_float32(&r, self.ctx)
+            return r as! T
+        case is Float.Type:
+            var r: Float = 0
+            mlx_array_item_float32(&r, self.ctx)
+            return r as! T
         case is Complex<Float32>.Type:
             // mlx_array_item_complex64() isn't visible in swift so read the array
-            // contents
+            // contents.  call self.eval() as this doesn't end up in item()
+            self.eval()
             let ptr = UnsafePointer<Complex<Float32>>(mlx_array_data_complex64(ctx))!
             return ptr.pointee as! T
         default:
@@ -229,7 +446,9 @@ public final class MLXArray {
     /// - <doc:conversion>
     public func asType(_ type: DType, stream: StreamOrDevice = .default) -> MLXArray {
         guard type != self.dtype else { return self }
-        return MLXArray(mlx_astype(ctx, type.cmlxDtype, stream.ctx))
+        var result = mlx_array_new()
+        mlx_astype(&result, ctx, type.cmlxDtype, stream.ctx)
+        return MLXArray(result)
     }
 
     /// Create a new `MLXArray` with the contents converted to the given type, e.g. `Float.self`.
@@ -240,190 +459,6 @@ public final class MLXArray {
     /// - <doc:conversion>
     public func asType<T: HasDType>(_ type: T.Type, stream: StreamOrDevice = .default) -> MLXArray {
         asType(T.dtype, stream: stream)
-    }
-
-    /// Return the dimension where the storage is contiguous.
-    ///
-    /// If this returns 0 then the whole storage is contiguous.  If it returns ndmin + 1 then none of it is contiguous.
-    func contiguousToDimension() -> Int {
-        let shape = self.shape
-        let strides = self.strides
-
-        var expectedStride = 1
-
-        for (dimension, (shape, stride)) in zip(shape, strides).enumerated().reversed() {
-            // as long as the actual strides match the expected (contiguous) strides
-            // the backing is contiguous in these dimensions
-            if stride != expectedStride {
-                return dimension + 1
-            }
-            expectedStride *= shape
-        }
-
-        return 0
-    }
-
-    /// Return the physical size of the backing (assuming it is evaluated) in elements
-    var physicalSize: Int {
-        // nbytes is the logical size of the input, not the physical size
-        return zip(self.shape, self.strides)
-            .map { Swift.abs($0.0 * $0.1) }
-            .max()
-            ?? self.size
-    }
-
-    func copy(from: UnsafeRawBufferPointer, to output: UnsafeMutableRawBufferPointer) {
-        let contiguousDimension = self.contiguousToDimension()
-
-        if contiguousDimension == 0 {
-            // entire backing is contiguous
-            from.copyBytes(to: output)
-
-        } else {
-            // only part of the backing is contiguous (possibly a single element)
-            // iterate the non-contiguous parts and copy the contiguous chunks into
-            // the output.
-
-            // these are the parts to iterate
-            let shape = self.shape.prefix(upTo: contiguousDimension)
-            let strides = self.strides.prefix(upTo: contiguousDimension)
-            let ndim = contiguousDimension
-            let itemSize = self.itemSize
-
-            // the size of each chunk that we copy.  this computes the stride of
-            // (contiguousDimension - 1) if it were contiguous
-            let destItemSize: Int
-            if contiguousDimension == self.ndim {
-                // nothing contiguous
-                destItemSize = itemSize
-            } else {
-                destItemSize =
-                    self.strides[contiguousDimension] * self.shape[contiguousDimension] * itemSize
-            }
-
-            // the index of the current source item
-            var index = Array.init(repeating: 0, count: ndim)
-
-            // output pointer
-            var dest = output.baseAddress!
-
-            while true {
-                // compute the source index by multiplying the index by the
-                // stride for each dimension
-
-                // note: in the case where the array has negative strides / offset
-                // the base pointer we have will have the offset already applied,
-                // e.g. asStrided(a, [3, 3], strides: [-3, -1], offset: 8)
-
-                let sourceIndex = zip(index, strides).reduce(0) { $0 + ($1.0 * $1.1) }
-
-                // convert to byte pointer
-                let src = from.baseAddress! + sourceIndex * itemSize
-                dest.copyMemory(from: src, byteCount: destItemSize)
-
-                // next output address
-                dest += destItemSize
-
-                // increment the index
-                for dimension in Swift.stride(from: ndim - 1, through: 0, by: -1) {
-                    // do we need to "carry" into the next dimension?
-                    if index[dimension] == (shape[dimension] - 1) {
-                        if dimension == 0 {
-                            // all done
-                            return
-                        }
-
-                        index[dimension] = 0
-                    } else {
-                        // just increment the dimension and we are done
-                        index[dimension] += 1
-                        break
-                    }
-                }
-            }
-
-        }
-    }
-
-    /// Return the contents as a single contiguous 1d `Swift.Array`.
-    ///
-    /// Note: because the number of dimensions is dynamic, this cannot produce a multi-dimensional
-    /// array.
-    ///
-    /// ### See Also
-    /// - <doc:conversion>
-    /// - ``asData(noCopy:)``
-    /// - ``asMTLBuffer(device:noCopy:)``
-    public func asArray<T: HasDType>(_ type: T.Type) -> [T] {
-        if type.dtype != self.dtype {
-            return self.asType(type).asArray(type)
-        }
-
-        self.eval()
-
-        return [T](unsafeUninitializedCapacity: self.size) { destination, initializedCount in
-            let source = UnsafeRawBufferPointer(
-                start: mlx_array_data_uint8(self.ctx), count: physicalSize * itemSize)
-            copy(from: source, to: UnsafeMutableRawBufferPointer(destination))
-            initializedCount = self.size
-        }
-    }
-
-    /// Return the contents as contiguous bytes in the native ``dtype``.
-    ///
-    /// > If you can guarantee the lifetime of the ``MLXArray`` will exceed the Data and that
-    /// the array will not be mutated (e.g. using indexing or other means) it is possible to pass `noCopy: true`
-    /// to reference the backing bytes.
-    ///
-    /// ### See Also
-    /// - <doc:conversion>
-    /// - ``asArray(_:)``
-    /// - ``asMTLBuffer(device:noCopy:)``
-    public func asData(noCopy: Bool = false) -> Data {
-        self.eval()
-
-        if noCopy && self.contiguousToDimension() == 0 {
-            // the backing is contiguous, we can provide a wrapper
-            // for the contents without a copy (if requested)
-            let source = UnsafeMutableRawPointer(mutating: mlx_array_data_uint8(self.ctx))!
-            return Data(
-                bytesNoCopy: source, count: self.nbytes,
-                deallocator: .none)
-        } else {
-            let source = UnsafeRawBufferPointer(
-                start: mlx_array_data_uint8(self.ctx), count: physicalSize * itemSize)
-
-            var data = Data(count: self.nbytes)
-            data.withUnsafeMutableBytes { destination in
-                copy(from: source, to: destination)
-            }
-            return data
-        }
-    }
-
-    /// Return the contents as a Metal buffer in the native ``dtype``.
-    ///
-    /// > If you can guarantee the lifetime of the ``MLXArray`` will exceed the MTLBuffer and that
-    /// the array will not be mutated (e.g. using indexing or other means) it is possible to pass `noCopy: true`
-    /// to reference the backing bytes.
-    ///
-    /// ### See Also
-    /// - <doc:conversion>
-    /// - ``asArray(_:)``
-    /// - ``asData(noCopy:)``
-    public func asMTLBuffer(device: any MTLDevice, noCopy: Bool = false) -> (any MTLBuffer)? {
-        self.eval()
-
-        if noCopy && self.contiguousToDimension() == 0 {
-            // the backing is contiguous, we can provide a wrapper
-            // for the contents without a copy (if requested)
-            let source = UnsafeMutableRawPointer(mutating: mlx_array_data_uint8(self.ctx))!
-            return device.makeBuffer(bytesNoCopy: source, length: self.nbytes)
-        } else {
-            let source = UnsafeRawBufferPointer(
-                start: mlx_array_data_uint8(self.ctx), count: physicalSize * itemSize)
-            return device.makeBuffer(bytes: source.baseAddress!, length: self.nbytes)
-        }
     }
 
     /// Convert the real array into a ``DType/complex64`` imaginary part.
@@ -474,17 +509,14 @@ public final class MLXArray {
 
     /// Replace the contents with a reference to a new array.
     public func update(_ array: MLXArray) {
-        if array.ctx != self.ctx {
-            mlx_retain(array.ctx)
-            mlx_free(ctx)
-            self.ctx = array.ctx
-        }
+        mlx_array_set(&self.ctx, array.ctx)
     }
 
     /// Internal function for copying the backing `mlx::core::array` context.
     func copyContext() -> MLXArray {
-        mlx_retain(ctx)
-        return MLXArray(ctx)
+        var new = mlx_array_new()
+        mlx_array_set(&new, self.ctx)
+        return MLXArray(new)
     }
 }
 
@@ -496,6 +528,9 @@ extension MLXArray: Updatable, Evaluatable {
 
 extension MLXArray: CustomStringConvertible {
     public var description: String {
-        mlx_describe(ctx) ?? String(describing: type(of: self))
+        var s = mlx_string_new()
+        mlx_array_tostring(&s, ctx)
+        defer { mlx_string_free(s) }
+        return String(cString: mlx_string_data(s), encoding: .utf8)!
     }
 }

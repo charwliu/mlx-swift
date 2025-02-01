@@ -53,7 +53,7 @@ public func leakyRelu(_ x: MLXArray, negativeSlope: Float = 0.01) -> MLXArray {
 }
 
 @available(*, deprecated, renamed: "logSoftmax(_:axis:)")
-@_documentation(visibility:internal)
+@_documentation(visibility: internal)
 public func logSoftMax(_ x: MLXArray, axis: Int = -1) -> MLXArray {
     logSoftmax(x, axis: axis)
 }
@@ -104,7 +104,7 @@ public func relu6(_ x: MLXArray) -> MLXArray {
 }
 
 @available(*, deprecated, renamed: "softplus(_:)")
-@_documentation(visibility:internal)
+@_documentation(visibility: internal)
 public func softPlus(_ x: MLXArray) -> MLXArray {
     softplus(x)
 }
@@ -125,7 +125,7 @@ public func softplus(_ x: MLXArray) -> MLXArray {
 }
 
 @available(*, deprecated, renamed: "softplus(_:)")
-@_documentation(visibility:internal)
+@_documentation(visibility: internal)
 public func softSign(_ x: MLXArray) -> MLXArray {
     softsign(x)
 }
@@ -230,7 +230,7 @@ public func geluApproximate(_ x: MLXArray) -> MLXArray {
 /// This is:
 ///
 /// ```swift
-/// x * sigmoid(1.773 * x)
+/// x * sigmoid(1.702 * x)
 /// ```
 ///
 /// ### See Also
@@ -347,7 +347,7 @@ public func hardSwish(_ x: MLXArray) -> MLXArray {
 /// - <doc:activations>
 /// - ``glu(_:axis:)``
 open class GLU: Module, UnaryLayer {
-    public let axis: Int
+    public var axis: Int
 
     public init(axis: Int = -1) {
         self.axis = axis
@@ -429,8 +429,15 @@ open class ReLU: Module, UnaryLayer {
 /// - <doc:activations>
 /// - ``leakyRelu(_:negativeSlope:)``
 open class LeakyReLU: Module, UnaryLayer {
+
+    public var negativeSlope: Float
+
+    public init(negativeSlope: Float = 0.01) {
+        self.negativeSlope = negativeSlope
+    }
+
     open func callAsFunction(_ x: MLXArray) -> MLXArray {
-        leakyRelu(x)
+        leakyRelu(x, negativeSlope: negativeSlope)
     }
 }
 
@@ -451,6 +458,14 @@ open class ReLU6: Module, UnaryLayer {
     }
 }
 
+@available(*, deprecated, renamed: "Softmax")
+@_documentation(visibility: internal)
+open class SoftMax: Module, UnaryLayer {
+    open func callAsFunction(_ x: MLXArray) -> MLXArray {
+        softmax(x)
+    }
+}
+
 /// Applies the Softmax function.
 ///
 /// This is:
@@ -461,14 +476,20 @@ open class ReLU6: Module, UnaryLayer {
 ///
 /// ### See Also
 /// - <doc:activations>
-open class SoftMax: Module, UnaryLayer {
+open class Softmax: Module, UnaryLayer {
+    public var axis: Int
+
+    public init(axis: Int = -1) {
+        self.axis = axis
+    }
+
     open func callAsFunction(_ x: MLXArray) -> MLXArray {
-        softmax(x, axis: -1)
+        softmax(x, axis: axis)
     }
 }
 
 @available(*, deprecated, renamed: "Softplus")
-@_documentation(visibility:internal)
+@_documentation(visibility: internal)
 open class SoftPlus: Module, UnaryLayer {
     open func callAsFunction(_ x: MLXArray) -> MLXArray {
         softPlus(x)
@@ -493,7 +514,7 @@ open class Softplus: Module, UnaryLayer {
 }
 
 @available(*, deprecated, renamed: "Softsign")
-@_documentation(visibility:internal)
+@_documentation(visibility: internal)
 open class SoftSign: Module, UnaryLayer {
     open func callAsFunction(_ x: MLXArray) -> MLXArray {
         softsign(x)
@@ -529,7 +550,7 @@ open class Softsign: Module, UnaryLayer {
 /// - <doc:activations>
 /// - ``celu(_:alpha:)``
 open class CELU: Module, UnaryLayer {
-    public let alpha: Float
+    public var alpha: Float
 
     public init(alpha: Float = 1.0) {
         self.alpha = alpha
@@ -559,7 +580,7 @@ open class SiLU: Module, UnaryLayer {
 }
 
 @available(*, deprecated, renamed: "LogSoftmax")
-@_documentation(visibility:internal)
+@_documentation(visibility: internal)
 open class LogSoftMax: Module, UnaryLayer {
     open func callAsFunction(_ x: MLXArray) -> MLXArray {
         logSoftmax(x)
@@ -578,8 +599,14 @@ open class LogSoftMax: Module, UnaryLayer {
 /// - <doc:activations>
 /// - ``logSoftmax(_:axis:)``
 open class LogSoftmax: Module, UnaryLayer {
+    public var axis: Int
+
+    public init(axis: Int = -1) {
+        self.axis = axis
+    }
+
     open func callAsFunction(_ x: MLXArray) -> MLXArray {
-        logSoftmax(x)
+        logSoftmax(x, axis: axis)
     }
 }
 
@@ -645,6 +672,8 @@ open class GELU: Module, UnaryLayer {
         case none
         /// See ``geluApproximate(_:)``
         case precise
+        /// Alias for ``precise`` -- see ``geluApproximate(_:)``
+        case tanh
         /// See ``geluFastApproximate(_:)``
         case fast
     }
@@ -660,7 +689,7 @@ open class GELU: Module, UnaryLayer {
         switch approximation {
         case .none:
             gelu(x)
-        case .precise:
+        case .precise, .tanh:
             geluApproximate(x)
         case .fast:
             geluFastApproximate(x)
@@ -708,7 +737,7 @@ open class HardSwish: Module, UnaryLayer {
 /// - ``step(_:threshold:)``
 open class Step: Module, UnaryLayer {
 
-    public let threshold: Float
+    public var threshold: Float
 
     public init(threshold: Float = 0.0) {
         self.threshold = threshold
@@ -739,85 +768,85 @@ open class SELU: Module, UnaryLayer {
 
 // MARK: - Compiled Activation Functions
 
-private let compiledLeakyRelu: (MLXArray, MLXArray) -> MLXArray = {
+private let compiledLeakyRelu: @Sendable (MLXArray, MLXArray) -> MLXArray = {
     compile(shapeless: true) { x, negativeSlope in
         maximum(negativeSlope * x, x)
     }
 }()
 
-private let compiledElu: (MLXArray, MLXArray) -> MLXArray = {
+private let compiledElu: @Sendable (MLXArray, MLXArray) -> MLXArray = {
     compile(shapeless: true) { x, alpha in
         which(x .> 0, x, alpha * (MLX.exp(x) - 1))
     }
 }()
 
-private let compiledRelu6: (MLXArray) -> MLXArray = {
+private let compiledRelu6: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         minimum(maximum(x, 0), 6)
     }
 }()
 
-private let compiledSoftsign: (MLXArray) -> MLXArray = {
+private let compiledSoftsign: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         x / (1 + abs(x))
     }
 }()
 
-private let compiledCelu: (MLXArray, MLXArray) -> MLXArray = {
+private let compiledCelu: @Sendable (MLXArray, MLXArray) -> MLXArray = {
     compile(shapeless: true) { x, alpha in
         maximum(x, 0.0) + alpha * (exp(minimum(x, 0.0) / alpha) - 1)
     }
 }()
 
-private let compiledSilu: (MLXArray) -> MLXArray = {
+private let compiledSilu: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         x * sigmoid(x)
     }
 }()
 
-private let compiledLogSigmoid: (MLXArray) -> MLXArray = {
+private let compiledLogSigmoid: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         -softplus(-x)
     }
 }()
 
-private let compiledGelu: (MLXArray) -> MLXArray = {
+private let compiledGelu: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         x * (1 + erf(x / sqrt(2))) / 2
     }
 }()
 
-private let compiledGeluApproximate: (MLXArray) -> MLXArray = {
+private let compiledGeluApproximate: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         0.5 * x * (1 + tanh(sqrt(2 / Float.pi) * (x + 0.044715 * x ** 3)))
     }
 }()
 
-private let compiledGeluFastApproximate: (MLXArray) -> MLXArray = {
+private let compiledGeluFastApproximate: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
-        x * sigmoid(1.773 * x)
+        x * sigmoid(1.702 * x)
     }
 }()
 
-private let compiledSelu: (MLXArray) -> MLXArray = {
+private let compiledSelu: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         elu(x, alpha: 1.67326) * 1.0507
     }
 }()
 
-private let compiledPrelu: (MLXArray, MLXArray) -> MLXArray = {
+private let compiledPrelu: @Sendable (MLXArray, MLXArray) -> MLXArray = {
     compile(shapeless: true) { x, alpha in
         maximum(0, x) + alpha * minimum(0, x)
     }
 }()
 
-private let compiledMish: (MLXArray) -> MLXArray = {
+private let compiledMish: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         x * tanh(softplus(x))
     }
 }()
 
-private let compiledHardSwish: (MLXArray) -> MLXArray = {
+private let compiledHardSwish: @Sendable (MLXArray) -> MLXArray = {
     compile(shapeless: true) { x in
         let maxXPlus3 = maximum(x + 3, 0)
         return x * minimum(maxXPlus3, 6) / 6

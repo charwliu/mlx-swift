@@ -22,24 +22,12 @@ let package = Package(
         .library(name: "MLXFFT", targets: ["MLXFFT"]),
         .library(name: "MLXLinalg", targets: ["MLXLinalg"]),
         .library(name: "MLXFast", targets: ["MLXFast"]),
-
-        // build support & back end
-        .plugin(
-            name: "PrepareMetalShaders",
-            targets: ["PrepareMetalShaders"]
-        ),
     ],
     dependencies: [
         // for Complex type
         .package(url: "https://github.com/apple/swift-numerics", from: "1.0.0")
     ],
     targets: [
-        // plugin to help build the metal shaders
-        .plugin(
-            name: "PrepareMetalShaders",
-            capability: .buildTool(),
-            path: "Plugins/PrepareMetalShaders"
-        ),
         .target(
             name: "Cmlx",
             exclude: [
@@ -48,9 +36,6 @@ let package = Package(
 
                 // vendored library, include header only
                 "json",
-
-                // vendored library, do not include driver
-                "gguf-tools/gguf-tools.c",
 
                 // vendored library
                 "fmt/test",
@@ -121,7 +106,6 @@ let package = Package(
                 .headerSearchPath("include/mlx-c"),
                 .headerSearchPath("metal-cpp"),
                 .headerSearchPath("json/single_include/nlohmann"),
-                .headerSearchPath("gguf-tools"),
                 .headerSearchPath("fmt/include"),
 
                 .define("ACCELERATE_NEW_LAPACK"),
@@ -133,10 +117,7 @@ let package = Package(
                 .linkedFramework("Foundation"),
                 .linkedFramework("Metal"),
                 .linkedFramework("Accelerate"),
-            ],
-
-            // run the plugin to build the metal shaders
-            plugins: [.plugin(name: "PrepareMetalShaders")]
+            ]
         ),
         .testTarget(
             name: "CmlxTests",
@@ -148,31 +129,52 @@ let package = Package(
             dependencies: [
                 "Cmlx",
                 .product(name: "Numerics", package: "swift-numerics"),
+            ],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
             ]
         ),
         .target(
             name: "MLXRandom",
-            dependencies: ["MLX"]
+            dependencies: ["MLX"],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
         ),
         .target(
             name: "MLXFast",
-            dependencies: ["MLX", "Cmlx"]
+            dependencies: ["MLX", "Cmlx"],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
         ),
         .target(
             name: "MLXNN",
-            dependencies: ["MLX", "MLXRandom", "MLXFast"]
+            dependencies: ["MLX", "MLXRandom", "MLXFast"],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
         ),
         .target(
             name: "MLXOptimizers",
-            dependencies: ["MLX", "MLXNN"]
+            dependencies: ["MLX", "MLXNN"],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
         ),
         .target(
             name: "MLXFFT",
-            dependencies: ["MLX"]
+            dependencies: ["MLX"],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
         ),
         .target(
             name: "MLXLinalg",
-            dependencies: ["MLX"]
+            dependencies: ["MLX"],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
         ),
 
         .testTarget(
@@ -196,15 +198,6 @@ let package = Package(
             dependencies: ["MLX"],
             path: "Source/Examples",
             sources: ["Tutorial.swift"]
-        ),
-
-        // ------
-        // Internal Tools
-
-        .executableTarget(
-            name: "GenerateGrad",
-            path: "Source/Tools",
-            sources: ["GenerateGrad.swift"]
         ),
 
     ],

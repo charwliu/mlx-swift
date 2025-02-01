@@ -24,7 +24,7 @@ import Numerics
 /// - ``MLXArray/asType(_:stream:)-6d44y``
 /// - ``MLXArray/asType(_:stream:)-4eqoc``
 /// - ``MLXArray/init(_:dtype:)``
-public enum DType: Hashable, Sendable {
+public enum DType: Hashable, Sendable, CaseIterable {
     case bool
     case uint8
     case uint16
@@ -39,7 +39,7 @@ public enum DType: Hashable, Sendable {
     case bfloat16
     case complex64
 
-    init(_ cmlxDtype: mlx_array_dtype) {
+    init(_ cmlxDtype: mlx_dtype) {
         switch cmlxDtype {
         case MLX_BOOL: self = .bool
         case MLX_UINT8: self = .uint8
@@ -59,7 +59,7 @@ public enum DType: Hashable, Sendable {
         }
     }
 
-    public var cmlxDtype: mlx_array_dtype {
+    public var cmlxDtype: mlx_dtype {
         switch self {
         case .bool: MLX_BOOL
         case .uint8: MLX_UINT8
@@ -105,6 +105,23 @@ public enum DType: Hashable, Sendable {
         default: false
         }
     }
+
+    public var size: Int {
+        mlx_dtype_size(cmlxDtype)
+    }
+}
+
+extension DType: Encodable {
+    public func encode(to encoder: any Encoder) throws {
+        try self.cmlxDtype.rawValue.encode(to: encoder)
+    }
+}
+
+extension DType: Decodable {
+    public init(from decoder: any Decoder) throws {
+        let rawValue = try UInt32(from: decoder)
+        self.init(mlx_dtype(rawValue: rawValue))
+    }
 }
 
 /// Protocol for types that can provide a ``DType``
@@ -131,32 +148,86 @@ extension Bool: HasDType {
 
 extension Int: HasDType {
     static public var dtype: DType { .int64 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        // callers can use Int64() to get explicit .int64 behavior
+        let dtype = dtype ?? .int32
+        return MLXArray(self, dtype: dtype == .bool ? .int32 : dtype)
+    }
 }
 
 extension Int8: HasDType {
     static public var dtype: DType { .int8 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 extension Int16: HasDType {
     static public var dtype: DType { .int16 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 extension Int32: HasDType {
     static public var dtype: DType { .int32 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 extension Int64: HasDType {
     static public var dtype: DType { .int64 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 
 extension UInt8: HasDType {
     static public var dtype: DType { .uint8 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 extension UInt16: HasDType {
     static public var dtype: DType { .uint16 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 extension UInt32: HasDType {
     static public var dtype: DType { .uint32 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 extension UInt64: HasDType {
     static public var dtype: DType { .uint64 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
+}
+extension UInt: HasDType {
+    static public var dtype: DType { .uint64 }
+
+    public func asMLXArray(dtype: DType?) -> MLXArray {
+        let dtype = dtype ?? Self.dtype
+        return MLXArray(self, dtype: dtype == .bool ? Self.dtype : dtype)
+    }
 }
 
 #if !arch(x86_64)
@@ -201,16 +272,10 @@ public protocol ScalarOrArray {
     func asMLXArray(dtype: DType?) -> MLXArray
 }
 
-extension Int: ScalarOrArray {
-    public func asMLXArray(dtype: DType?) -> MLXArray {
-        // callers can use Int64() to get explicit .int64 behavior
-        MLXArray(Int32(self), dtype: dtype ?? .int32)
-    }
-}
-
 extension Double: ScalarOrArray {
     public func asMLXArray(dtype: DType?) -> MLXArray {
-        MLXArray(Float(self), dtype: dtype ?? .float32)
+        let dtype = dtype ?? .float32
+        return MLXArray(Float(self), dtype: dtype.isFloatingPoint ? dtype : .float32)
     }
 }
 
@@ -250,7 +315,7 @@ extension Array: ScalarOrArray where Element: HasDType {
 /// - If neither is an array convert to arrays but leave their types alone
 ///
 /// See also ``ScalarOrArray``.
-@_documentation(visibility:internal)
+@_documentation(visibility: internal)
 public func toArrays<T1: ScalarOrArray, T2: ScalarOrArray>(_ a: T1, _ b: T2) -> (MLXArray, MLXArray)
 {
     if let a = a as? MLXArray {
